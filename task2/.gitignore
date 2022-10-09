@@ -1,0 +1,4 @@
+data/
+src/*/*_backup*
+./*backup*
+./src/__pycache__
