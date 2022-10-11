@@ -134,5 +134,5 @@ dmypy.json
 # Visual Studio Code
 .vscode/
 
-# Anaconda
+# Jupyter Notebook
 catboost_info/
