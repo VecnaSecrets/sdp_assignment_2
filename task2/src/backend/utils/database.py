@@ -4,9 +4,10 @@ import pandas as pd
 import time
 import requests
 from io import StringIO
+import os
 
 
-class Database:
+class database:
     # time details
     session_start = None
     start_date = datetime(2022, 9, 1)
@@ -26,22 +27,28 @@ class Database:
             self._ref = super().__new__(self)
         return self._ref
 
-    def __init__(self, start=datetime(2022, 9, 1)):
+    def __init__(self, start=datetime(2022, 9, 1), save_path='./db.csv'):
+
         self.start_date = start
-        self.data = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
+        #self.data = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
         self.last_update = start
         self.session_start = datetime.now()
-        with open('url_data.json', 'r') as f:
+        with open('./src/backend/utils/url_data.json', 'r') as f:
             self.data_urls = json.load(f)
+        self.save_path = save_path
+
+        _ = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
+        _.to_csv(self.save_path, index=False)
         self.get_data_for_period(datetime(2022, 9, 1), self.start_date)
 
-    def get_data_for_period(self, start=None, end=None):
+    def get_data_for_period(self, start=None, end=None, save_to_file=True):
         if start is None:
             start = self.last_update
 
         if end is None:
             end = self.calculate_sim_time()
 
+        data = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
         delta = (end-start).days
         for n in range(delta+1):
             date = start + timedelta(days=n)
@@ -64,12 +71,17 @@ class Database:
             if n == delta:
                 buff = buff.loc[buff['timestamp'].apply(lambda x: datetime.strptime(x, self.mask) < end)]
 
-            self.data = pd.concat([self.data, buff], axis=0)
-        return buff
+            data = pd.concat([data, buff], axis=0)
 
-    def update_database(self):
+        if save_to_file:
+            data_old = pd.read_csv(self.save_path)
+            pd.concat([data_old, data]).to_csv(self.save_path, index=False)
+
+        return data
+
+    def update_database(self, save=True):
         end = self.calculate_sim_time()
-        out = self.get_data_for_period(start=self.last_update, end=end)
+        out = self.get_data_for_period(start=self.last_update, end=end, save_to_file=save)
         self.last_update = end
         return out
 
@@ -78,11 +90,11 @@ class Database:
         return self.start_date + timedelta(minutes=mins_passed)
 
     def get_database(self):
-        return self.data
+        return pd.read_csv(self.save_path)
 
 if __name__ == "__main__":
     # start and specify date until we download initial data
-    base = Database(start=datetime(2022, 9, 3))
+    base = database(start=datetime(2022, 9, 2))
 
     # update base and receive new items
     time.sleep(2)

@@ -1,16 +1,23 @@
-from pyexpat import model
+import sys
+sys.path.append("./src/backend/utils/")
+
 from xmlrpc.client import boolean
-import numpy as np
 import pandas as pd
 from pathlib import Path
 import psycopg2
 from time import gmtime, strftime, sleep
+from datetime import datetime
+
+from database import database
+
+START_DATE = datetime(2022, 9, 2)
 
 class System:    
     def __init__(self, data_dir, csv_filename, model=None) -> None:
         self.data_dir = Path(data_dir)
+        self.db = database(start=START_DATE, save_path=self.data_dir / csv_filename)
         self.connect_db()
-        self.fetch_data()
+        #self.fetch_data() # kinda useless in init as database class download it upon creating itself
         self.update_user_data(csv_filename)
         self.model = model
 
@@ -22,21 +29,25 @@ class System:
 
         sql = """DROP TABLE IF EXISTS users;"""
         self.cursor.execute(sql)
-
         sql = """CREATE TABLE IF NOT EXISTS users (
-                                        user_id varchar(50), 
+                                        client_user_id varchar(50), 
                                         session_id varchar(60),
-                                        some_data varchar(1)
+                                        dropped_frames VARCHAR(10),
+                                        FPS VARCHAR(10),
+                                        bitrate VARCHAR(10),
+                                        RTT VARCHAR(10),
+                                        timestamp VARCHAR(30),
+                                        device VARCHAR(50)
                                     )"""
         self.cursor.execute(sql)
 
     def fetch_data(self):
-        '''Download csv files locally'''
-        # todo
+        #timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+        data = self.db.update_database(save=False)
+        timestamp = self.db.last_update.strftime("%B %d, %Y")
+        csv_filename = f'db_update_{timestamp}.csv'
+        data.to_csv(self.data_dir / csv_filename, index=False)
 
-        timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-        # csv_filename = f'users_new_data_{timestamp}.csv'
-        csv_filename = f'users_new_data.csv'
         return csv_filename
 
     def update_user_data(self, csv_filename):
@@ -54,14 +65,14 @@ class System:
         table = pd.read_sql(query, self.conn)
         return table
 
-    def get_user_data(self, user_id=None, session_id=None):
+    def get_user_data(self, client_user_id=None, session_id=None):
         '''Returns data of a user, searched by user id and/or session id'''
-        if user_id is not None and session_id is not None:
+        if client_user_id is not None and session_id is not None:
             query = '''select * from users 
-                    where user_id = user_id and session_id = session_id;'''
-        elif user_id is not None:
+                    where client_user_id = client_user_id and session_id = session_id;'''
+        elif client_user_id is not None:
             query = '''select * from users 
-                    where user_id = user_id;'''
+                    where client_user_id = client_user_id;'''
         elif session_id is not None:
             query = '''select * from users 
                     where session_id = session_id;'''
@@ -107,12 +118,12 @@ class System:
         else:
             print('This user is not registered or has no games yet')
 
-    def user_present(self, user_id) -> boolean:
+    def user_present(self, client_user_id) -> boolean:
         '''Query database to see if a user has played games before'''
         query = '''
             select 1 
             from users
-            where user_id = user_id
+            where client_user_id = client_user_id
             '''
         query_result = pd.read_sql(query, self.conn)
         return query_result is not None
@@ -227,8 +238,8 @@ class User:
         avg_dropped_frames = self.get_avg_dropped_frames()
         avg_bitrate = self.get_avg_bitrate()
         num_failed_sessions = self.get_num_failed_sessions()
-        expected_next_session_duration = self.get_expected_next_session_duration()
-        super_user = self.is_super_user()
+        #expected_next_session_duration = self.get_expected_next_session_duration()
+        #super_user = self.is_super_user()
         self.summary = f'User {self.user_id} summary:\n ' \
                         f'Number of sessions: {first_session_dt} \n' \
                         f'Date of first session: {num_sessions} \n' \
@@ -242,15 +253,15 @@ class User:
                         f'\tDropped Frames: {avg_dropped_frames} \n' \
                         f'\tBitrate: {avg_bitrate} \n' \
                         f'Total number of bad sessions (predicted using ML model): {num_failed_sessions} \n' \
-                        f'Estimated next session time: {expected_next_session_duration} \n' \
-                        f'Super user or Not (a user who has sessions time more than 60 min in a week): {super_user} \n'
+                        #f'Estimated next session time: {expected_next_session_duration} \n' \
+                        #f'Super user or Not (a user who has sessions time more than 60 min in a week): {super_user} \n'
         return self.summary
 
     
 
 
 if __name__ == '__main__':
-    system = System(data_dir = './data', csv_filename='users.csv') #todo argparse
+    system = System(data_dir = './data', csv_filename='db.csv') #todo argparse
 
     while True:
         action = int(input(f'Choose one operation from below :\n' \
