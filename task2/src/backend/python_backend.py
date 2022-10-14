@@ -15,7 +15,7 @@ START_DATE = datetime(2022, 9, 2)
 class System:    
     def __init__(self, data_dir, csv_filename, model=None) -> None:
         self.data_dir = Path(data_dir)
-        self.db = database(start=START_DATE, save_path=self.data_dir / csv_filename)
+        self.db = database(start=START_DATE, save_path= self.data_dir / csv_filename)
         self.connect_db()
         #self.fetch_data() # kinda useless in init as database class download it upon creating itself
         self.update_user_data(csv_filename)
@@ -43,10 +43,10 @@ class System:
 
     def fetch_data(self):
         #timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-        data = self.db.update_database(save=False)
+        data = self.db.update_database(save=True)
         timestamp = self.db.last_update.strftime("%B %d, %Y")
         csv_filename = f'db_update_{timestamp}.csv'
-        data.to_csv(self.data_dir / csv_filename, index=False)
+        data.to_csv(self.data_dir / csv_filename, index=True)
 
         return csv_filename
 
@@ -261,7 +261,7 @@ class User:
 
 
 if __name__ == '__main__':
-    system = System(data_dir = './data', csv_filename='db.csv') #todo argparse
+    system = System(data_dir='./src/backend/data', csv_filename='db.csv') #todo argparse
 
     while True:
         action = int(input(f'Choose one operation from below :\n' \

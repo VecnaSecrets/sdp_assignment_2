@@ -27,7 +27,7 @@ class database:
             self._ref = super().__new__(self)
         return self._ref
 
-    def __init__(self, start=datetime(2022, 9, 1), save_path='./db.csv'):
+    def __init__(self, start=datetime(2022, 9, 1), save_path='./data/db.csv'):
 
         self.start_date = start
         #self.data = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
@@ -40,6 +40,7 @@ class database:
         _ = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
         _.to_csv(self.save_path, index=False)
         self.get_data_for_period(datetime(2022, 9, 1), self.start_date)
+
 
     def get_data_for_period(self, start=None, end=None, save_to_file=True):
         if start is None:
