@@ -6,12 +6,15 @@ import pandas as pd
 from pathlib import Path
 import psycopg2
 from time import gmtime, strftime, sleep
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from database import database
+import tabulate
+
+import numpy as np
 
 START_DATE = datetime(2022, 9, 2)
-
+GROUND_DATE = datetime(2022, 9, 1)
 class System:    
     def __init__(self, data_dir, csv_filename, model=None) -> None:
         self.data_dir = Path(data_dir)
@@ -36,7 +39,7 @@ class System:
                                         FPS VARCHAR(10),
                                         bitrate VARCHAR(10),
                                         RTT VARCHAR(10),
-                                        timestamp VARCHAR(30),
+                                        timestamp timestamp WITHOUT TIME ZONE,
                                         device VARCHAR(50)
                                     )"""
         self.cursor.execute(sql)
@@ -46,7 +49,7 @@ class System:
         data = self.db.update_database(save=True)
         timestamp = self.db.last_update.strftime("%B %d, %Y")
         csv_filename = f'db_update_{timestamp}.csv'
-        data.to_csv(self.data_dir / csv_filename, index=True)
+        data.to_csv(self.data_dir / csv_filename, index=False)
 
         return csv_filename
 
@@ -82,22 +85,51 @@ class System:
         else:
             return 'Please specify user_id and/or session_id'
 
-    def get_status_past_week(self):
-        '''1 : Get status for the past 7 days''' 
-        # todo: query db, group and aggregate
-        print(f'Statistics for the past 7 days: \n'
-              f'Total sessions : 13451 \n'
-              f'Average time spent per session : 30 min \n'
-              f'Sum of hours spent by all users : 200001 hours'
-            )
-        system_summary = ''
+    def get_status(self, start_date=None, end_date=None):
+        if start_date is None:
+            start_date = GROUND_DATE
+        if end_date is None:
+            end_date = self.db.last_update
+        if start_date > end_date:
+            print("ERROR: start date is later than end_date")
+            return False
 
+        sql_mask = "YYYY-MM-DD HH24:MI:SS"
+        start_date = start_date.strftime(self.db.mask)
+        end_date = end_date.strftime(self.db.mask)
+
+        print(start_date, end_date)
+        print(f"'{end_date}', '{self.db.mask}'")
+        query = "select session_id, MIN(timestamp), EXTRACT(EPOCH FROM MAX(timestamp)-MIN(timestamp))/3600 as time_diff " \
+                "from users " \
+                f"where timestamp between to_timestamp('{start_date}', '{sql_mask}') and to_timestamp('{end_date}', '{sql_mask}') " \
+                "group by client_user_id, session_id " \
+
+        res = pd.read_sql(query, self.conn)
+
+        system_summary = f'Total sessions : {res.shape[0]} \n' \
+                     f'Average time spent per session : {np.round(np.sum(res["time_diff"])/res.shape[0] * 60,0)} mins \n' \
+                     f'Sum of hours spent by all users : {np.round(np.sum(res["time_diff"]),2)} hours'
+
+        return system_summary
+
+    def save_summary_on_command(self, summary):
         save_to_file = input('Would you like to save the summary? (y/n)')
         if save_to_file == 'yes' or save_to_file == 'y':
             timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
             output_filename = self.data_dir / 'summaries' / f'system_summary_{timestamp}.txt'
-            self.save_to_file(system_summary, output_filename)
+            self.save_to_file(summary, output_filename)
 
+    def get_status_past_week(self):
+        '''1 : Get status for the past 7 days''' 
+        # todo: query db, group and aggregate
+
+        start_date = self.db.calculate_sim_time() - timedelta(weeks=1)
+
+        system_summary = f'Statistics for the past 7 days: \n' + self.get_status(start_date)
+        print(system_summary)
+        self.save_summary_on_command(system_summary)
+        return True
 
     def print_user_summary(self):
         '''2 : Print user summary'''
@@ -130,7 +162,9 @@ class System:
 
     def save_to_file(self, content, filename):
         # todo: save summary to a txt file
-        pass
+        with open(filename, 'w+') as f:
+            f.write(content)
+
 
 
     def predict_user_next_session_duration(self) -> float:
@@ -154,11 +188,23 @@ class System:
     def get_top_users(self):
         '''5 : Get top 5 users based on time spent gaming'''
         # todo: query db with rank()
-        pass
+        query = "with foo as (" \
+                "   select client_user_id, session_id, EXTRACT(EPOCH FROM MAX(timestamp::timestamp)-MIN(timestamp::timestamp))/3600 as time_diff " \
+                "   from users " \
+                "   group by client_user_id, session_id " \
+                ") " \
+                "select client_user_id, SUM(time_diff) as session_time from foo " \
+                "group by client_user_id " \
+                "order by session_time DESC " \
+                "limit 5"
+
+        print(tabulate.tabulate(pd.read_sql(query, con=self.conn), headers=["RANK", "USER ID", "HOURS"]))
+        return True
 
     def exit_program(self):
         '''6 : Exit program'''
-        self.get_status_past_week()
+        summary = f'Statistics for the whole period: \n' + self.get_status()
+        self.save_summary_on_command(summary)
         print(f'Good bye!!')
 
 class User:
