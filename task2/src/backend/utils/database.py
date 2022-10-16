@@ -27,7 +27,7 @@ class database:
             self._ref = super().__new__(self)
         return self._ref
 
-    def __init__(self, start=datetime(2022, 9, 1), save_path='./db.csv'):
+    def __init__(self, start=datetime(2022, 9, 1), save_path='./data/db.csv'):
 
         self.start_date = start
         #self.data = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
@@ -38,10 +38,13 @@ class database:
         self.save_path = save_path
 
         _ = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         _.to_csv(self.save_path, index=False)
         self.get_data_for_period(datetime(2022, 9, 1), self.start_date)
 
+
     def get_data_for_period(self, start=None, end=None, save_to_file=True):
+        print("Downloading data... ")
         if start is None:
             start = self.last_update
 
@@ -62,7 +65,7 @@ class database:
 
             req = requests.get(url, headers=self.headers)
             if req.status_code != 200:
-                print('Status code is {req.status_code}. Aborting')
+                print(f'Status code is {req.status_code}. Aborting')
                 return False
             buff = pd.read_csv(StringIO(req.text))
 
@@ -75,8 +78,9 @@ class database:
 
         if save_to_file:
             data_old = pd.read_csv(self.save_path)
+            os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
             pd.concat([data_old, data]).to_csv(self.save_path, index=False)
-
+        print("done")
         return data
 
     def update_database(self, save=True):

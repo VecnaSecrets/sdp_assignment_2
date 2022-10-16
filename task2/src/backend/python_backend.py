@@ -6,20 +6,28 @@ import pandas as pd
 from pathlib import Path
 import psycopg2
 from time import gmtime, strftime, sleep
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from database import database
+import tabulate
+
+import numpy as np
+import os
+
+import warnings
+warnings.filterwarnings("ignore")
 
 START_DATE = datetime(2022, 9, 2)
-
+GROUND_DATE = datetime(2022, 9, 1)
 class System:    
     def __init__(self, data_dir, csv_filename, model=None) -> None:
         self.data_dir = Path(data_dir)
-        self.db = database(start=START_DATE, save_path=self.data_dir / csv_filename)
+        self.db = database(start=START_DATE, save_path= self.data_dir / csv_filename)
         self.connect_db()
         #self.fetch_data() # kinda useless in init as database class download it upon creating itself
         self.update_user_data(csv_filename)
         self.model = model
+        self.sql_mask = "YYYY-MM-DD HH24:MI:SS"
 
     def connect_db(self):
         conn_string = "host='db' dbname='postgres_db' user='user' password='password'" 
@@ -27,23 +35,65 @@ class System:
         self.conn.autocommit = True
         self.cursor = self.conn.cursor()
 
+        sql = """DROP VIEW IF EXISTS users_sum;"""
+        self.cursor.execute(sql)
+        sql = """DROP VIEW IF EXISTS sessions_sum;"""
+        self.cursor.execute(sql)
         sql = """DROP TABLE IF EXISTS users;"""
         self.cursor.execute(sql)
+
         sql = """CREATE TABLE IF NOT EXISTS users (
                                         client_user_id varchar(50), 
-                                        session_id varchar(60),
-                                        dropped_frames VARCHAR(10),
-                                        FPS VARCHAR(10),
-                                        bitrate VARCHAR(10),
-                                        RTT VARCHAR(10),
-                                        timestamp VARCHAR(30),
-                                        device VARCHAR(50)
+                                        session_id varchar(50),
+                                        dropped_frames REAL,
+                                        FPS REAL,
+                                        bitrate REAL,
+                                        RTT REAL,
+                                        timestamp timestamp WITHOUT TIME ZONE,
+                                        device TEXT
                                     )"""
         self.cursor.execute(sql)
+        sql = """
+                CREATE OR REPLACE VIEW sessions_sum AS
+                SELECT client_user_id, 
+                        session_id,
+                        AVG(dropped_frames) as avg_dropped_frames,
+                        AVG(FPS) as avg_fps,
+                        AVG(bitrate) as avg_bitrate,
+                        AVG(RTT) as avg_RTT,
+                        STRING_AGG(DISTINCT device, ',') as device,
+                        EXTRACT(EPOCH FROM MAX(timestamp::timestamp)-MIN(timestamp::timestamp))/3600 as total_hours,
+                        MAX(timestamp::timestamp) as session_end,
+                        MIN(timestamp::timestamp) as session_start
+                from users
+                GROUP BY client_user_id, session_id
+        """
+        self.cursor.execute(sql)
+
+        sql = """
+                CREATE OR REPLACE VIEW users_sum AS
+                SELECT client_user_id,
+                        COUNT(DISTINCT session_id) as num_sessions,
+                        AVG(avg_dropped_frames) as avg_dropped_frames,
+                        AVG(avg_fps) as avg_fps,
+                        AVG(avg_bitrate) as avg_bitrate,
+                        AVG(avg_RTT) as avg_RTT,
+                        STRING_AGG(DISTINCT device, ',') as devices,
+                        COUNT(*) FILTER (WHERE device='Windows') AS Windows_entry,
+                        COUNT(*) FILTER (WHERE device='Mac') AS Mac_entry,
+                        COUNT(*) FILTER (WHERE device='Android') AS Android_entry,
+                        SUM(total_hours) as total_hours,
+                        MAX(session_start)::date as last_session,
+                        MIN(session_start)::date as first_session
+                from sessions_sum
+                GROUP BY client_user_id
+        """
+        self.cursor.execute(sql)
+
 
     def fetch_data(self):
         #timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-        data = self.db.update_database(save=False)
+        data = self.db.update_database(save=True)
         timestamp = self.db.last_update.strftime("%B %d, %Y")
         csv_filename = f'db_update_{timestamp}.csv'
         data.to_csv(self.data_dir / csv_filename, index=False)
@@ -82,55 +132,123 @@ class System:
         else:
             return 'Please specify user_id and/or session_id'
 
-    def get_status_past_week(self):
-        '''1 : Get status for the past 7 days''' 
-        # todo: query db, group and aggregate
-        print(f'Statistics for the past 7 days: \n'
-              f'Total sessions : 13451 \n'
-              f'Average time spent per session : 30 min \n'
-              f'Sum of hours spent by all users : 200001 hours'
-            )
-        system_summary = ''
+    def get_status(self, start_date=None, end_date=None):
+        if start_date is None:
+            start_date = GROUND_DATE
+        if end_date is None:
+            end_date = self.db.last_update
+        if start_date > end_date:
+            print("ERROR: start date is later than end_date")
+            return False
 
+        start_date = start_date.strftime(self.db.mask)
+        end_date = end_date.strftime(self.db.mask)
+
+        query = "select session_id, MIN(timestamp), EXTRACT(EPOCH FROM MAX(timestamp)-MIN(timestamp))/3600 as time_diff " \
+                "from users " \
+                f"where timestamp between to_timestamp('{start_date}', '{self.sql_mask}') and to_timestamp('{end_date}', '{self.sql_mask}') " \
+                "group by client_user_id, session_id " \
+
+        res = pd.read_sql(query, self.conn)
+
+        system_summary = f'Total sessions : {res.shape[0]} \n' \
+                     f'Average time spent per session : {np.round(np.sum(res["time_diff"])/res.shape[0] * 60,0)} mins \n' \
+                     f'Sum of hours spent by all users : {np.round(np.sum(res["time_diff"]),2)} hours'
+
+        return system_summary
+
+    def save_summary_on_command(self, summary):
         save_to_file = input('Would you like to save the summary? (y/n)')
         if save_to_file == 'yes' or save_to_file == 'y':
             timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
             output_filename = self.data_dir / 'summaries' / f'system_summary_{timestamp}.txt'
-            self.save_to_file(system_summary, output_filename)
+            self.save_to_file(summary, output_filename)
 
+    def get_status_past_week(self):
+        '''1 : Get status for the past 7 days''' 
+        # todo: query db, group and aggregate
+
+        start_date = self.db.calculate_sim_time() - timedelta(weeks=1)
+
+        system_summary = f'Statistics for the past 7 days: \n' + self.get_status(start_date)
+        print(system_summary)
+        self.save_summary_on_command(system_summary)
+        return True
 
     def print_user_summary(self):
         '''2 : Print user summary'''
-        user_id = input('Enter user id: \n')  # '0116f41a-28b1-4d81-b250-15d7956e2be1' 
-        time_period = input('Enter period (yy/mm/dd - yy/mm/dd): \n') # '2022/07/10 - 2022/08/10' 
-        
+        sql = "SELECT * from users_sum"
+        data = pd.read_sql(sql, self.conn)
+        mask = "%y/%m/%d"
+
+        user_id = input('Enter user id: \n')  # '0116f41a-28b1-4d81-b250-15d7956e2be1'
+        time_period = input(f'Enter period ({mask} - {mask}): \n') # '2022/07/10 - 2022/08/10'
+        start = None
+        end = None
+
+        try:
+            time_period = time_period.split(' - ')
+            start = datetime.strptime(time_period[0], mask)
+            end = datetime.strptime(time_period[1], mask)
+        except:
+            print("Date is not recognized, printing summary for the whole period")
+
         if self.user_present(user_id):
             print('User found')
-            user = User(user_id=user_id, system=self)
+            sql = f"""
+            SELECT * FROM users_sum
+            WHERE client_user_id = '{user_id}'
+            """
+            data = pd.read_sql(sql, self.conn)
+            date_week_back = self.db.calculate_sim_time() - timedelta(days=7)
+            print(data)
 
-            user_summary = user.get_user_summary(time_period)
+            sql = f"""
+            SELECT 
+                SUM(total_hours) as total_hours
+            FROM sessions_sum
+            WHERE client_user_id = '{user_id}' AND
+                session_start > to_timestamp('{date_week_back}', '{self.sql_mask}')
+            GROUP BY client_user_id
+            """
+
+            super_user = pd.read_sql(sql, self.conn)["total_hours"][0] > 1
+            print(pd.read_sql(sql, self.conn)["total_hours"][0])
+            i = ["windows_entry", "mac_entry", "android_entry"]
+            index = np.argmax(data[i].values, axis=1)
+            frequent_dev = i[index[0]]
+            print(frequent_dev)
+            user_summary = f"""
+            User with id : {user_id}
+                Number of sessions : {data["num_sessions"][0]}
+                Date of first session : {data["first_session"][0]}
+                Average time spent per session : {data["total_hours"][0] / data["num_sessions"][0]}
+                Date of most recent session : {data["last_session"][0]}
+                Most frequently used device : {frequent_dev}
+                Devices used : {data["devices"][0]}
+                Estimated next session time : 4 hrs
+                Super user : {"Yes" if super_user else "No"}
+            """
             print(user_summary)
-            
-            save_to_file = input('Would you like to save the summary? (y/n)')
-            if save_to_file == 'yes' or save_to_file == 'y':
-                output_filename = self.data_dir / 'summaries' / f'user_{self.user_id}_summary.txt'
-                self.save_to_file(user_summary, output_filename)
-        else:
-            print('This user is not registered or has no games yet')
+
+            self.save_summary_on_command(user_summary)
 
     def user_present(self, client_user_id) -> boolean:
         '''Query database to see if a user has played games before'''
-        query = '''
-            select 1 
+        query = f'''
+            select client_user_id
             from users
-            where client_user_id = client_user_id
+            where client_user_id = '{client_user_id}'
             '''
         query_result = pd.read_sql(query, self.conn)
-        return query_result is not None
+        return query_result.shape[0]>0
 
     def save_to_file(self, content, filename):
         # todo: save summary to a txt file
-        pass
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'w+') as f:
+            f.write(content)
+
 
 
     def predict_user_next_session_duration(self) -> float:
@@ -154,11 +272,24 @@ class System:
     def get_top_users(self):
         '''5 : Get top 5 users based on time spent gaming'''
         # todo: query db with rank()
-        pass
+        query = "with foo as (" \
+                "   select client_user_id, session_id, EXTRACT(EPOCH FROM MAX(timestamp::timestamp)-MIN(timestamp::timestamp))/3600 as time_diff " \
+                "   from users " \
+                "   group by client_user_id, session_id " \
+                ") " \
+                "select client_user_id, SUM(time_diff) as session_time from foo " \
+                "group by client_user_id " \
+                "order by session_time DESC " \
+                "limit 5"
+
+        print(tabulate.tabulate(pd.read_sql(query, con=self.conn), headers=["RANK", "USER ID", "HOURS"]))
+        return True
 
     def exit_program(self):
         '''6 : Exit program'''
-        self.get_status_past_week()
+        summary = f'Statistics for the whole period: \n' + self.get_status()
+        print(summary)
+        self.save_summary_on_command(summary)
         print(f'Good bye!!')
 
 class User:
@@ -261,7 +392,7 @@ class User:
 
 
 if __name__ == '__main__':
-    system = System(data_dir = './data', csv_filename='db.csv') #todo argparse
+    system = System(data_dir='./src/backend/data', csv_filename='db.csv') #todo argparse
 
     while True:
         action = int(input(f'Choose one operation from below :\n' \
@@ -291,3 +422,5 @@ if __name__ == '__main__':
 
 
 
+
+#%%
