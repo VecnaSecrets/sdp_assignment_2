@@ -1,0 +1,4 @@
+Statistics for the whole period: 
+Total sessions : 221 
+Average time spent per session : 61.0 mins 
+Sum of hours spent by all users : 226.01 hours
