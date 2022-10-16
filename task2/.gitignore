@@ -2,4 +2,4 @@ src/*/*_backup*
 ./*backup*
 ./src/__pycache__
 ./src/backend/summary/*
-./src/backend/data/*
+./src/backend/data/*/*
