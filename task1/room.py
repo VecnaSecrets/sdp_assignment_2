@@ -48,8 +48,8 @@ class Room:
               f'has_conditioner:{self.has_conditioner}\n\t' \
               f'Activities:'
         for activity in self.activities:
-            start = datetime.strftime(activity.start, '%H:%M:%S')
-            end = datetime.strftime(activity.end, '%H:%M:%S')
+            start = time.strftime(activity.start, '%H:%M:%S')
+            end = time.strftime(activity.end, '%H:%M:%S')
             out += f'\t{activity.name} ' \
                    f'({start} - {end})\n\t\t\t'
         return out
@@ -68,20 +68,21 @@ class Room:
         if start > end:
             print('time is out of working hours')
             return False
-        if not self.is_time_between(time(8, 0), time(21, 0), start.time()) and not self.is_time_between(time(8, 0), time(21, 0), end.time()):
+        if not self.is_time_between(time(8, 0), time(21, 0), start) and not self.is_time_between(time(8, 0), time(21, 0), end):
+            print('time is out of working hours')
             return False
         for act in self.activities:
             if start < act.end and act.start < end:
-                print("Im here")
+                print('This time interval is not free')
                 return False
         return True
 
     def add_activity(self, act):
-        if self.check_time(act.start, act.end):     # Also Check if time in between 8:00 and 21:00
+        if self.check_time(act.start, act.end):
             self.activities.append(act)
 
     def is_free(self):
         for activity in self.activities:
-            if self.is_time_between(activity.start.time(), activity.end.time()):
+            if self.is_time_between(activity.start, activity.end):
                 return False
         return True
