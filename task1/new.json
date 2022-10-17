@@ -45,12 +45,6 @@
             "number": 228,
             "has_conditioner": false,
             "activities": []
-        },
-        {
-            "capacity": 123,
-            "number": 321,
-            "has_conditioner": false,
-            "activities": []
         }
     ],
     "LectureAuditoriums": [
@@ -68,6 +62,18 @@
                     "name": "Lecture 2",
                     "start": "10:00:00",
                     "end": "12:30:00"
+                }
+            ]
+        },
+        {
+            "capacity": 111,
+            "number": 12,
+            "has_conditioner": false,
+            "activities": [
+                {
+                    "name": "sadsd",
+                    "start": "20:59:59",
+                    "end": "21:00:00"
                 }
             ]
         }
