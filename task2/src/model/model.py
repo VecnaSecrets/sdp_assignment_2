@@ -81,7 +81,6 @@ class Model():
                 prediction.to_csv(self.data_output_path + input_csv_path, index=False)
 
                 Path(self.data_input_path + input_csv_path).unlink()
-            print("searching...")
             time.sleep(3)
 
 

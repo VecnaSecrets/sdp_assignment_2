@@ -17,17 +17,17 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 
-START_DATE = datetime(2022, 9, 2)
+START_DATE = datetime(2022, 9, 10)
 GROUND_DATE = datetime(2022, 9, 1)
 class System:
-    data_input_path = './src/model/model_input/'
+    data_input_path = Path('./src/model/model_input/')
     data_output_path = Path('./src/model/model_output/')
     def __init__(self, data_dir, csv_filename, model=None) -> None:
         self.data_dir = Path(data_dir)
 
         os.makedirs(os.path.dirname(self.data_dir / 'summaries' ), exist_ok=True)
-        os.makedirs(os.path.dirname(self.data_dir / 'model_input' ), exist_ok=True)
-        os.makedirs(os.path.dirname(self.data_dir / 'model_output' ), exist_ok=True)
+        os.makedirs(os.path.dirname(self.data_output_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.data_input_path), exist_ok=True)
         
         self.db = database(start=START_DATE, ground_date=GROUND_DATE, save_path= self.data_dir / csv_filename)
         self.connect_db()
@@ -136,8 +136,8 @@ class System:
     def update_model_results(self):
         timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
 
-        sessions_path = self.data_input_path + f"sessions_{timestamp}_data.csv"
-        users_path = self.data_input_path + f"users_{timestamp}_data.csv"
+        sessions_path = self.data_input_path / f"sessions_{timestamp}_data.csv"
+        users_path = self.data_input_path / f"users_{timestamp}_data.csv"
         pd.read_sql("SELECT * FROM sessions_sum", self.conn).to_csv(sessions_path, index=False)
         pd.read_sql("SELECT * FROM users_sum", self.conn).to_csv(users_path, index=False)
 
@@ -149,7 +149,7 @@ class System:
 
         self.cursor.execute("""DROP TABLE IF EXISTS temp;""")
         sql = """CREATE TABLE temp(
-            client_user_id varchar(50),
+            session_id varchar(50),
             stream_quality REAL
         )"""
         self.cursor.execute(sql)
@@ -157,17 +157,17 @@ class System:
         self.cursor.copy_expert(sql, open(sessions_path, "r"))
 
         sql = """UPDATE users 
-                SET users.stream_quality = temp.stream_quality
-                WHERE users.client_user_id = temp.client_user_id
-                STDIN DELIMITER ',' CSV HEADER"""
-
+                SET stream_quality = subquery.stream_quality 
+                FROM (SELECT * FROM temp) as subquery
+                WHERE users.session_id=subquery.session_id"""
+        self.cursor.execute(sql)
 
         while not os.path.isfile(users_path):
             sleep(1)
 
         self.cursor.execute("""DROP TABLE IF EXISTS temp;""")
         sql = """CREATE TABLE temp(
-            session_id varchar(50),
+            client_user_id varchar(50),
             next_session REAL
         )"""
         self.cursor.execute(sql)
@@ -175,12 +175,11 @@ class System:
         self.cursor.copy_expert(sql, open(users_path, "r"))
 
         sql = """UPDATE users 
-                SET users.next_session = temp.next_session
-                WHERE users.session_id = temp.session_id
-                STDIN DELIMITER ',' CSV HEADER"""
+                SET next_session = subquery.next_session 
+                FROM (SELECT * FROM temp) as subquery
+                WHERE users.client_user_id=subquery.client_user_id"""
 
-
-
+        self.cursor.execute(sql)
 
 
     def get_all_users(self):
@@ -254,9 +253,7 @@ class System:
 
         user_id = input('Enter user id: \n') 
         today = strftime("%Y-%m-%d", gmtime())
-        time_period = input(f'Today is {today}. Please, enter period ({mask} - {mask}). For example, 2022-09-01 - 2022-10-01: \n') 
-        start = None
-        end = None
+        time_period = input(f'Today is {today}. Please, enter period ({mask} - {mask}). For example, 2022-09-01 - 2022-10-01: \n')
 
         if not self.user_present(user_id):
             print('This user is not registered or has no games yet')
@@ -287,7 +284,9 @@ class System:
                         AVG(avg_rtt) as avg_rtt,
                         AVG(avg_fps) as avg_fps,
                         AVG(avg_dropped_frames) as avg_dropped_frames,
-                        AVG(avg_bitrate) as avg_bitrate
+                        AVG(avg_bitrate) as avg_bitrate,
+                        AVG(next_session) as next_session,
+                        SUM(stream_quality) as stream_quality   
                 from (
                         SELECT client_user_id, 
                                 session_id,
@@ -299,7 +298,9 @@ class System:
                                 AVG(rtt) as avg_rtt,
                                 AVG(FPS) as avg_fps,
                                 AVG(dropped_frames) as avg_dropped_frames,
-                                AVG(bitrate) as avg_bitrate     
+                                AVG(bitrate) as avg_bitrate,
+                                AVG(next_session) as next_session,
+                                AVG(stream_quality) as stream_quality   
                         from users
                         WHERE client_user_id = '{user_id}'
                             AND timestamp BETWEEN to_timestamp('{start}', '{self.sql_mask}') AND to_timestamp('{end}', '{self.sql_mask}')
@@ -327,8 +328,8 @@ class System:
             \tFrames per Second: {row["avg_fps"]}
             \tDropped Frames: {row["avg_dropped_frames"]}
             \tBitrate: {row["avg_bitrate"]}
-            Total number of bad sessions (predicted using ML model):
-            Estimated next session time : 4 hrs
+            Total number of bad sessions (predicted using ML model): {int(row["stream_quality"])}
+            Estimated next session time : {np.round(row["next_session"],2)}
             Super user : {"Yes" if (row["total_sessions_duration_sec"] / 60) / (row["user_lifetime_days"]) > 60/7 else "No"}
         """
         print(user_summary)
@@ -354,21 +355,14 @@ class System:
 
     def predict_user_next_session_duration(self):
         '''3 : Predict user next session duration'''
-        user_id = input('Enter user id: \n') 
+        user_id = input('Enter user id: \n')
+
         if self.user_present(user_id):
             print('User found')
-            
-            df = pd.DataFrame({'user_id':[user_id]})
-            timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-            df.to_csv(self.data_dir / 'model_input' / f'user_id_{user_id}_{timestamp}.csv')
-            
-            prediction_file_path = self.data_dir / 'model_output' / f'user_id_{user_id}_{timestamp}.csv'
-            while not prediction_file_path.exists():
-                sleep(3)
-            prediction_df = pd.read_csv(prediction_file_path)
-            prediction = prediction_df.iloc[0]['user_id']
-
-            print(print(f'User {user_id} will play for {prediction} seconds next time'))
+            sql = f"""SELECT next_session FROM users_sum
+                    WHERE client_user_id = '{user_id}'"""
+            res = pd.read_sql(sql, self.conn).iloc[0]["next_session"]
+            print(print(f'User {user_id} will play for {int(np.round(res*3600,0))} seconds next time'))
         else:
             print('This user is not registered or has no games yet')
 
