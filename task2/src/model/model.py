@@ -4,58 +4,186 @@ import pandas as pd
 from pathlib import Path
 import random
 import time
+import os
+import pickle
+from joblib import dump, load
+from catboost import CatBoostRegressor, CatBoostClassifier
+import sys
+from io import StringIO
+
+#prefix = './'
+prefix = './src/model/'
+flag = False
 
 class Model():
-
-    inference_history = []
+    data_input_path = prefix + 'model_input/'
+    data_output_path = prefix + 'model_output/'
+    data_model_path = prefix + 'models/'
+    #inference_history = []
 
     def __init__(self) -> None:
+        os.makedirs(os.path.dirname(self.data_input_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.data_output_path), exist_ok=True)
         print('Model is created!!!')
+        self.stream_model = load(self.data_model_path + "stream_model.joblib")
+        self.time_model = load(self.data_model_path + "time_model.joblib")
         self.run()
+
 
     def train(self, data_path):
         print(f'Gonna train!!!')
         # todo
-        train_data = pd.read_csv(Path(data_path))
-        print(f'train data size: {len(train_data.index)}')
+        train_data = pd.read_csv(data_path)
+        print(data_path.split('/')[-1].split("_")[0])
+        if data_path.split('/')[-1].split("_")[0] == 'users':
+            x_train, y_train = self.pipeline_users(train_data)
+            self.time_model.fit(x_train, y_train)
+            dump(self.time_model, self.data_model_path + "time_model.joblib")
+            return True
 
+        if data_path.split('/')[-1].split("_")[0] == 'sessions':
+            return True
+
+        print("Incorrect file name")
+        return False
+
+    def predict(self, data_path):
+        print("predicting")
+        data = pd.read_csv(Path(data_path))
+        if data_path.split('/')[-1].split("_")[0] == 'users':
+            data_clean, _ = self.pipeline_users(data)
+            data["next_session"] = self.time_model.predict(data_clean)
+            return data[["client_user_id", "next_session"]]
+
+        if data_path.split('/')[-1].split("_")[0] == 'sessions':
+            data_clean = self.pipeline_sessions(data)
+            data["stream_quality"] = self.stream_model.predict(data_clean)
+            return data[["session_id", "stream_quality"]]
+
+        print("File name is not correct")
+        return False
+    """
     def updates_present(self):
         # todo: check if needs updates
         # return self.db.size() > self.cur_db_size
-        return False
+        return len(os.listdir(self.data_dir)) > 0
+    """
 
     def run(self):
         print(f'Gonna run the model!!!')
-        self.data_dir = Path('./data')
-        
+
         while True:
-            if self.updates_present():
-                    print(f'updates present, need to train')
-                    data_path = Path('./data/users_new_data.csv')
-                    self.train(data_path)
+            for input_csv_path in os.listdir(self.data_input_path):
+                print(f'updates present, need to train')
+                self.train(self.data_input_path + input_csv_path)
 
-            for input_csv_path in (self.data_dir / 'model_input').iterdir():
-                input_df = pd.read_csv(input_csv_path)
-                user_id = input_df.iloc[0]['user_id']
+                prediction = self.predict(self.data_input_path + input_csv_path)
+                prediction.to_csv(self.data_output_path + input_csv_path, index=False)
 
-                prediction = self.inference(user_id)
-
-                output_df = pd.DataFrame({'user_id': [prediction]})
-                output_csv_filename = input_csv_path.name
-                output_df.to_csv(self.data_dir / 'model_output' / output_csv_filename)
-
-                self.inference_history.append(user_id)
-                input_csv_path.unlink()
-                time.sleep(2)
+                Path(self.data_input_path + input_csv_path).unlink()
 
             time.sleep(3)
 
-    def inference(self, user_id):
-        i = random.randint(0, 10)
-        # todo: query from db user's prev sessions
-        # and return average session duration or ML predictions
-        return i
 
 
+    def pipeline_users(self, df: pd.DataFrame):
+        """Applies a custom pipeline to the passed dataset.
+        Parameters
+        ----------
+        df : pd.DataFrame
+            dataset to be transformed
+        Returns
+        -------
+        Tuple[pd.DataFrame, pd.Series]
+            X and y
+        """
+
+        df = df.reset_index(drop=True)
+        df = df.replace(to_replace=np.nan, value=0)
+
+        # Data Engineering
+        df = df.drop(
+            labels=[
+                "client_user_id",
+                "devices",
+                "android_entry",
+                "last_session",
+                "first_session",
+            ],
+            axis=1,
+        )
+
+        # Split
+        X = df.drop(labels=["stream_quality", "next_session"], axis=1)
+        y = df.total_hours
+
+        return X, y
+    def pipeline_sessions(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Applies a custom pipeline to the passed dataset.
+        Parameters
+        ----------
+        df : pd.DataFrame
+            dataset to be transformed
+        Returns
+        -------
+        pd.DataFrame
+            X
+        """
+
+        df = df.reset_index(drop=True)
+        df = df.replace(to_replace=np.nan, value=0)
+
+        # Data Engineering
+        df = df.drop(
+            labels=[
+                "client_user_id",
+                "session_id",
+                "session_end",
+                "session_start",
+                "stream_quality",
+                "next_session",
+                "device",
+                "avg_bitrate",
+                "std_bitrate",
+            ],
+            axis=1,
+        )
+        df.rename(
+            columns={
+                "avg_fps": "fps_mean",
+                "std_fps": "fps_std",
+                "avg_dropped_frames": "dropped_frames_mean",
+                "std_dropped_frames": "dropped_frames_std",
+                "max_dropped_frames": "dropped_frames_max",
+                "avg_rtt": "rtt_mean",
+                "std_rtt": "rtt_std",
+            }, inplace=True
+        )
+        df = df[
+            [
+                "fps_mean",
+                "fps_std",
+                "rtt_mean",
+                "rtt_std",
+                "dropped_frames_mean",
+                "dropped_frames_std",
+                "dropped_frames_max",
+            ]
+        ]
+        return df
+
+
+
+
+"""
+with open(prefix + 'models/stream_model.pkl', "wb+") as f:
+    pickle.dump(stream_model(), f)
+
+with open(prefix + 'models/time_model.pkl', "wb+") as f:
+    pickle.dump(time_model(), f)
+"""
+
+
+print("Hello world")
 model = Model()
-model.run()
+

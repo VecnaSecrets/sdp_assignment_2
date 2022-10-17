@@ -1,0 +1,11 @@
+Hello world
+Model is created!!!
+Gonna run the model!!!
+updates present, need to train
+Gonna train!!!
+users
+predicting
+updates present, need to train
+Gonna train!!!
+sessions
+predicting
