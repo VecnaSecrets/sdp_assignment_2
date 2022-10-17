@@ -1,15 +1,12 @@
-from statistics import mode
+import catboost
 import numpy as np
 import pandas as pd
 from pathlib import Path
-import random
 import time
 import os
-import pickle
-from joblib import dump, load
-from catboost import CatBoostRegressor, CatBoostClassifier
-import sys
-from io import StringIO
+from pickle import dump, load
+
+#from joblib import dump, load
 
 #prefix = './'
 prefix = './src/model/'
@@ -25,8 +22,11 @@ class Model():
         os.makedirs(os.path.dirname(self.data_input_path), exist_ok=True)
         os.makedirs(os.path.dirname(self.data_output_path), exist_ok=True)
         print('Model is created!!!')
-        self.stream_model = load(self.data_model_path + "stream_model.joblib")
-        self.time_model = load(self.data_model_path + "time_model.joblib")
+
+        with open(self.data_model_path + "stream_model.pkl", "rb") as f:
+            self.stream_model = load(f)
+        with open(self.data_model_path + "time_model.pkl", "rb") as f:
+            self.time_model = load(f)
         self.run()
 
 
@@ -37,8 +37,8 @@ class Model():
         print(data_path.split('/')[-1].split("_")[0])
         if data_path.split('/')[-1].split("_")[0] == 'users':
             x_train, y_train = self.pipeline_users(train_data)
-            self.time_model.fit(x_train, y_train)
-            dump(self.time_model, self.data_model_path + "time_model.joblib")
+            with open(self.data_model_path + "time_model.pkl", "wb") as f:
+                dump(self.time_model, f)
             return True
 
         if data_path.split('/')[-1].split("_")[0] == 'sessions':
@@ -81,7 +81,7 @@ class Model():
                 prediction.to_csv(self.data_output_path + input_csv_path, index=False)
 
                 Path(self.data_input_path + input_csv_path).unlink()
-
+            print("searching...")
             time.sleep(3)
 
 
