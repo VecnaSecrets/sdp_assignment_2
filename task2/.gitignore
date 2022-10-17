@@ -3,6 +3,7 @@ src/*/*_backup*
 ./src/__pycache__
 ./src/backend/data/summary/*
 ./src/backend/data/*
+./data/
 ./data/model_output/*
 ./data/model_input/*
 ./data/summary/*
