@@ -92,9 +92,9 @@ class Terminal:
         try:
             print('Enter activity name: ')
             name = input()
-            print('Enter start time(format: HH:MM::SS):')
+            print('Enter start time(format: HH:MM:SS):')
             start = datetime.strptime(input(), '%H:%M:%S').time()
-            print('Enter end time(format: HH:MM::SS):')
+            print('Enter end time(format: HH:MM:SS):')
             end = datetime.strptime(input(), '%H:%M:%S').time()
         except:
             print('\033[91m' + '\nWrong input\n' + '\033[0m')
