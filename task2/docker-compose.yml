@@ -10,8 +10,8 @@ services:
       - "8880:8888"
     container_name: python_container
     depends_on:
-      - db
       - model
+      - db
     stdin_open: true
     tty: true
   db:

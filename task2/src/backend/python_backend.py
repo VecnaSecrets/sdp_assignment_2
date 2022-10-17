@@ -17,21 +17,32 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 
-START_DATE = datetime(2022, 9, 2)
+START_DATE = datetime(2022, 9, 10)
 GROUND_DATE = datetime(2022, 9, 1)
-class System:    
+class System:
+    data_input_path = Path('./src/model/model_input/')
+    data_output_path = Path('./src/model/model_output/')
     def __init__(self, data_dir, csv_filename, model=None) -> None:
         self.data_dir = Path(data_dir)
-        self.db = database(start=START_DATE, save_path= self.data_dir / csv_filename)
+
+        os.makedirs(os.path.dirname(self.data_dir / 'summaries' ), exist_ok=True)
+        os.makedirs(os.path.dirname(self.data_output_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.data_input_path), exist_ok=True)
+        
+        self.db = database(start=START_DATE, ground_date=GROUND_DATE, save_path= self.data_dir / csv_filename)
         self.connect_db()
-        #self.fetch_data() # kinda useless in init as database class download it upon creating itself
-        self.update_user_data(csv_filename)
-        self.model = model
+        database_path = self.fetch_data()
+        self.update_user_data(database_path)
+
         self.sql_mask = "YYYY-MM-DD HH24:MI:SS"
+
+        pd.read_sql("SELECT * FROM users_sum", self.conn).to_csv("./users_exm.csv")
+        pd.read_sql("SELECT * FROM sessions_sum", self.conn).to_csv("./sessions_exm.csv")
 
     def connect_db(self):
         conn_string = "host='db' dbname='postgres_db' user='user' password='password'" 
         self.conn = psycopg2.connect(conn_string)
+        sleep(2)
         self.conn.autocommit = True
         self.cursor = self.conn.cursor()
 
@@ -50,21 +61,30 @@ class System:
                                         bitrate REAL,
                                         RTT REAL,
                                         timestamp timestamp WITHOUT TIME ZONE,
-                                        device TEXT
+                                        device TEXT,
+                                        stream_quality REAL,
+                                        next_session REAL
                                     )"""
         self.cursor.execute(sql)
         sql = """
                 CREATE OR REPLACE VIEW sessions_sum AS
                 SELECT client_user_id, 
                         session_id,
-                        AVG(dropped_frames) as avg_dropped_frames,
                         AVG(FPS) as avg_fps,
+                        STDDEV(FPS) as std_fps,
                         AVG(bitrate) as avg_bitrate,
-                        AVG(RTT) as avg_RTT,
+                        STDDEV(bitrate) as std_bitrate,
+                        AVG(dropped_frames) as avg_dropped_frames,
+                        STDDEV(dropped_frames) as std_dropped_frames,
+                        MAX(dropped_frames) as max_dropped_frames,
+                        STDDEV(RTT) as std_rtt,
+                        AVG(RTT) as avg_rtt,
                         STRING_AGG(DISTINCT device, ',') as device,
                         EXTRACT(EPOCH FROM MAX(timestamp::timestamp)-MIN(timestamp::timestamp))/3600 as total_hours,
                         MAX(timestamp::timestamp) as session_end,
-                        MIN(timestamp::timestamp) as session_start
+                        MIN(timestamp::timestamp) as session_start,
+                        AVG(stream_quality) as stream_quality,
+                        AVG(next_session) as next_session
                 from users
                 GROUP BY client_user_id, session_id
         """
@@ -76,28 +96,33 @@ class System:
                         COUNT(DISTINCT session_id) as num_sessions,
                         AVG(avg_dropped_frames) as avg_dropped_frames,
                         AVG(avg_fps) as avg_fps,
+                        AVG(std_fps) as std_fps,
                         AVG(avg_bitrate) as avg_bitrate,
-                        AVG(avg_RTT) as avg_RTT,
+                        AVG(std_bitrate) as std_bitrate,
+                        AVG(avg_rtt) as avg_rtt,
+                        AVG(std_rtt) as std_rtt,
                         STRING_AGG(DISTINCT device, ',') as devices,
                         COUNT(*) FILTER (WHERE device='Windows') AS Windows_entry,
                         COUNT(*) FILTER (WHERE device='Mac') AS Mac_entry,
                         COUNT(*) FILTER (WHERE device='Android') AS Android_entry,
                         SUM(total_hours) as total_hours,
                         MAX(session_start)::date as last_session,
-                        MIN(session_start)::date as first_session
+                        MIN(session_start)::date as first_session,
+                        AVG(stream_quality) as stream_quality,
+                        AVG(next_session) as next_session
                 from sessions_sum
                 GROUP BY client_user_id
         """
         self.cursor.execute(sql)
 
-
     def fetch_data(self):
-        #timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-        data = self.db.update_database(save=True)
+        data = self.db.update_database(save=False)
+        data["stream_quality"] = 0
+        data["next_session"] = 0
         timestamp = self.db.last_update.strftime("%B %d, %Y")
         csv_filename = f'db_update_{timestamp}.csv'
-        data.to_csv(self.data_dir / csv_filename, index=False)
 
+        data.to_csv(self.data_dir / csv_filename, index=False)
         return csv_filename
 
     def update_user_data(self, csv_filename):
@@ -106,9 +131,56 @@ class System:
 
         sql = """COPY users FROM STDIN DELIMITER ',' CSV HEADER"""
         self.cursor.copy_expert(sql, open(csv_path, "r"))
+        self.update_model_results()
 
-    def update_model(self):
-        pass
+    def update_model_results(self):
+        timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+
+        sessions_path = self.data_input_path / f"sessions_{timestamp}_data.csv"
+        users_path = self.data_input_path / f"users_{timestamp}_data.csv"
+        pd.read_sql("SELECT * FROM sessions_sum", self.conn).to_csv(sessions_path, index=False)
+        pd.read_sql("SELECT * FROM users_sum", self.conn).to_csv(users_path, index=False)
+
+        sessions_path = self.data_output_path / f"sessions_{timestamp}_data.csv"
+        users_path = self.data_output_path / f"users_{timestamp}_data.csv"
+
+        while not os.path.isfile(sessions_path):
+            sleep(1)
+
+        self.cursor.execute("""DROP TABLE IF EXISTS temp;""")
+        sql = """CREATE TABLE temp(
+            session_id varchar(50),
+            stream_quality REAL
+        )"""
+        self.cursor.execute(sql)
+        sql = """COPY temp FROM STDIN DELIMITER ',' CSV HEADER"""
+        self.cursor.copy_expert(sql, open(sessions_path, "r"))
+
+        sql = """UPDATE users 
+                SET stream_quality = subquery.stream_quality 
+                FROM (SELECT * FROM temp) as subquery
+                WHERE users.session_id=subquery.session_id"""
+        self.cursor.execute(sql)
+
+        while not os.path.isfile(users_path):
+            sleep(1)
+
+        self.cursor.execute("""DROP TABLE IF EXISTS temp;""")
+        sql = """CREATE TABLE temp(
+            client_user_id varchar(50),
+            next_session REAL
+        )"""
+        self.cursor.execute(sql)
+        sql = """COPY temp FROM STDIN DELIMITER ',' CSV HEADER"""
+        self.cursor.copy_expert(sql, open(users_path, "r"))
+
+        sql = """UPDATE users 
+                SET next_session = subquery.next_session 
+                FROM (SELECT * FROM temp) as subquery
+                WHERE users.client_user_id=subquery.client_user_id"""
+
+        self.cursor.execute(sql)
+
 
     def get_all_users(self):
         query = '''select distinct(user_id) from users;'''
@@ -158,108 +230,139 @@ class System:
         return system_summary
 
     def save_summary_on_command(self, summary):
-        save_to_file = input('Would you like to save the summary? (y/n)')
+        save_to_file = input('Would you like to save the summary? (y/n) ')
         if save_to_file == 'yes' or save_to_file == 'y':
             timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
             output_filename = self.data_dir / 'summaries' / f'system_summary_{timestamp}.txt'
+            os.makedirs(os.path.dirname(output_filename), exist_ok=True)
             self.save_to_file(summary, output_filename)
 
     def get_status_past_week(self):
         '''1 : Get status for the past 7 days''' 
-        # todo: query db, group and aggregate
 
         start_date = self.db.calculate_sim_time() - timedelta(weeks=1)
 
-        system_summary = f'Statistics for the past 7 days: \n' + self.get_status(start_date)
+        system_summary = f'Statistics for the past 7 days: \n' + self.get_status(start_date=start_date)
         print(system_summary)
         self.save_summary_on_command(system_summary)
         return True
 
     def print_user_summary(self):
         '''2 : Print user summary'''
-        sql = "SELECT * from users_sum"
-        data = pd.read_sql(sql, self.conn)
         mask = "%y/%m/%d"
 
-        user_id = input('Enter user id: \n')  # '0116f41a-28b1-4d81-b250-15d7956e2be1'
-        time_period = input(f'Enter period ({mask} - {mask}): \n') # '2022/07/10 - 2022/08/10'
-        start = None
-        end = None
+        user_id = input('Enter user id: \n') 
+        today = strftime("%Y-%m-%d", gmtime())
+        time_period = input(f'Today is {today}. Please, enter period ({mask} - {mask}). For example, 2022-09-01 - 2022-10-01: \n')
+
+        if not self.user_present(user_id):
+            print('This user is not registered or has no games yet')
+            return
+        else:
+            print('User found')
 
         try:
             time_period = time_period.split(' - ')
             start = datetime.strptime(time_period[0], mask)
             end = datetime.strptime(time_period[1], mask)
         except:
-            print("Date is not recognized, printing summary for the whole period")
+            print("Date is not recognized, printing user summary for the whole period")
+            start = GROUND_DATE
+            end = self.db.last_update
+                
+        sql = f"""
+                SELECT client_user_id,
+                        COUNT(DISTINCT session_id) as num_sessions,
+                        MIN(session_start)::date as first_session,
+                        MAX(session_start)::date as last_session,
+                        SUM(session_duration_sec) as total_sessions_duration_sec,
+                        (MAX(session_start)::date - MIN(session_start)::date) as user_lifetime_days,
+                        STRING_AGG(DISTINCT device, ',') as devices,
+                        COUNT(*) FILTER (WHERE device='Windows') AS Windows_entry,
+                        COUNT(*) FILTER (WHERE device='Mac') AS Mac_entry,
+                        COUNT(*) FILTER (WHERE device='Android') AS Android_entry,
+                        AVG(avg_rtt) as avg_rtt,
+                        AVG(avg_fps) as avg_fps,
+                        AVG(avg_dropped_frames) as avg_dropped_frames,
+                        AVG(avg_bitrate) as avg_bitrate,
+                        AVG(next_session) as next_session,
+                        SUM(stream_quality) as stream_quality   
+                from (
+                        SELECT client_user_id, 
+                                session_id,
+                                MIN(timestamp::timestamp) as session_start,
+                                MAX(timestamp::timestamp) as session_end,
+                                EXTRACT(EPOCH FROM MAX(timestamp::timestamp)-MIN(timestamp::timestamp)) as session_duration_sec,
+                                STRING_AGG(DISTINCT device, ',') as device,
+                                mode() WITHIN GROUP (ORDER BY device) AS device_modal_value,
+                                AVG(rtt) as avg_rtt,
+                                AVG(FPS) as avg_fps,
+                                AVG(dropped_frames) as avg_dropped_frames,
+                                AVG(bitrate) as avg_bitrate,
+                                AVG(next_session) as next_session,
+                                AVG(stream_quality) as stream_quality   
+                        from users
+                        WHERE client_user_id = '{user_id}'
+                            AND timestamp BETWEEN to_timestamp('{start}', '{self.sql_mask}') AND to_timestamp('{end}', '{self.sql_mask}')
+                        GROUP BY client_user_id, session_id
+                ) sessions_info
+                GROUP BY client_user_id
+        """
 
-        if self.user_present(user_id):
-            print('User found')
-            sql = f"""
-            SELECT * FROM users_sum
-            WHERE client_user_id = '{user_id}'
-            """
-            data = pd.read_sql(sql, self.conn)
-            date_week_back = self.db.calculate_sim_time() - timedelta(days=7)
-            print(data)
+        data = pd.read_sql(sql, self.conn)
+        i = ["windows_entry", "mac_entry", "android_entry"]
+        index = np.argmax(data[i].values, axis=1)
+        frequent_dev = i[index[0]]
+        row = data.iloc[0]
 
-            sql = f"""
-            SELECT 
-                SUM(total_hours) as total_hours
-            FROM sessions_sum
-            WHERE client_user_id = '{user_id}' AND
-                session_start > to_timestamp('{date_week_back}', '{self.sql_mask}')
-            GROUP BY client_user_id
-            """
+        user_summary = f"""
+        User with id : {user_id}
+            Number of sessions : {row["num_sessions"]}
+            Date of first session : {row["first_session"]}
+            Date of most recent session : {row["last_session"]}
+            Average time spent per session : {(row["total_sessions_duration_sec"] / 3600) / row["num_sessions"]} hours
+            Most frequently used device : {frequent_dev}
+            Devices used : {row["devices"]}
+            Average:
+            \tRound trip time (RTT): {row["avg_rtt"]}
+            \tFrames per Second: {row["avg_fps"]}
+            \tDropped Frames: {row["avg_dropped_frames"]}
+            \tBitrate: {row["avg_bitrate"]}
+            Total number of bad sessions (predicted using ML model): {int(row["stream_quality"])}
+            Estimated next session time : {np.round(row["next_session"],2)}
+            Super user : {"Yes" if (row["total_sessions_duration_sec"] / 60) / (row["user_lifetime_days"]) > 60/7 else "No"}
+        """
+        print(user_summary)
 
-            super_user = pd.read_sql(sql, self.conn)["total_hours"][0] > 1
-            print(pd.read_sql(sql, self.conn)["total_hours"][0])
-            i = ["windows_entry", "mac_entry", "android_entry"]
-            index = np.argmax(data[i].values, axis=1)
-            frequent_dev = i[index[0]]
-            print(frequent_dev)
-            user_summary = f"""
-            User with id : {user_id}
-                Number of sessions : {data["num_sessions"][0]}
-                Date of first session : {data["first_session"][0]}
-                Average time spent per session : {data["total_hours"][0] / data["num_sessions"][0]}
-                Date of most recent session : {data["last_session"][0]}
-                Most frequently used device : {frequent_dev}
-                Devices used : {data["devices"][0]}
-                Estimated next session time : 4 hrs
-                Super user : {"Yes" if super_user else "No"}
-            """
-            print(user_summary)
-
-            self.save_summary_on_command(user_summary)
+        self.save_summary_on_command(user_summary)
 
     def user_present(self, client_user_id) -> boolean:
         '''Query database to see if a user has played games before'''
         query = f'''
-            select client_user_id
+            select count(client_user_id)
             from users
             where client_user_id = '{client_user_id}'
             '''
         query_result = pd.read_sql(query, self.conn)
-        return query_result.shape[0]>0
+        return query_result.iloc[0]['count'] > 0
 
     def save_to_file(self, content, filename):
-        # todo: save summary to a txt file
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, 'w+') as f:
             f.write(content)
 
 
 
-    def predict_user_next_session_duration(self) -> float:
+    def predict_user_next_session_duration(self):
         '''3 : Predict user next session duration'''
-        user_id = input('Enter user id: \n') # user_id = '0116f41a-28b1-4d81-b250-15d7956e2be1' 
-        
+        user_id = input('Enter user id: \n')
+
         if self.user_present(user_id):
             print('User found')
-            user = User(user_id=user_id, system=self)
-            prediction = user.get_expected_next_session_duration()
-            print(print(f'User {user_id} will play for {prediction} seconds next time'))
+            sql = f"""SELECT next_session FROM users_sum
+                    WHERE client_user_id = '{user_id}'"""
+            res = pd.read_sql(sql, self.conn).iloc[0]["next_session"]
+            print(print(f'User {user_id} will play for {int(np.round(res*3600,0))} seconds next time'))
         else:
             print('This user is not registered or has no games yet')
 
@@ -267,11 +370,9 @@ class System:
         '''4 : Fetch new data and update users data and ML model'''
         csv_filename = self.fetch_data()
         self.update_user_data(csv_filename=csv_filename)
-        self.update_model()
 
     def get_top_users(self):
         '''5 : Get top 5 users based on time spent gaming'''
-        # todo: query db with rank()
         query = "with foo as (" \
                 "   select client_user_id, session_id, EXTRACT(EPOCH FROM MAX(timestamp::timestamp)-MIN(timestamp::timestamp))/3600 as time_diff " \
                 "   from users " \
@@ -292,107 +393,12 @@ class System:
         self.save_summary_on_command(summary)
         print(f'Good bye!!')
 
-class User:
 
-    def __init__(self, user_id, system) -> None:
-        self.user_id = user_id
-        self.system = system
-
-    def get_user_data(self):
-        pass
-
-    def get_session_id(self):
-        '''Returns latest session id'''
-        pass
-
-    def get_num_sessions(self):
-        pass
-    
-    def get_first_session_dt(self):
-        pass
-    
-    def get_latest_session_dt(self):
-        pass
-    
-    def get_session_avg_duration(self):
-        pass
-    
-    def get_favourite_device(self):
-        pass
-    
-    def get_devices_used(self) -> list:
-        pass
-    
-    def get_avg_round_trip_time(self):
-        pass
-    
-    def get_avg_frames_per_second(self):
-        pass
-    
-    def get_avg_dropped_frames(self):
-        pass
-    
-    def get_avg_bitrate(self):
-        pass
-    
-    def get_num_failed_sessions(self):
-        pass
-
-    def get_expected_next_session_duration(self):
-        '''A model predicts the duration of next session for the user'''
-        df = pd.DataFrame({'user_id':[self.user_id]})
-        timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-        df.to_csv(self.system.data_dir / 'model_input' / f'user_id_{self.user_id}_{timestamp}.csv')
-        
-        prediction_file_path = self.system.data_dir / 'model_output' / f'user_id_{self.user_id}_{timestamp}.csv'
-        while not prediction_file_path.exists():
-            sleep(3)
-        prediction_df = pd.read_csv(prediction_file_path)
-        prediction = prediction_df.iloc[0]['user_id']
-        return prediction
-
-    def is_super_user(self):
-        '''A user is considered to be a super user if the user has sessions time > 60 mins in a week'''
-        pass
-
-    def get_user_summary(self, time_period=None):
-        # todo: if time_period is None: take aall data since first session, else filter
-    
-        num_sessions = self.get_num_sessions()
-        first_session_dt = self.get_first_session_dt()
-        latest_session_dt = self.get_latest_session_dt()
-        session_avg_duration = self.get_session_avg_duration()
-        favourite_device = self.get_favourite_device()
-        devices_used = self.get_devices_used()
-        avg_round_trip_time = self.get_avg_round_trip_time()
-        avg_frames_per_second = self.get_avg_frames_per_second()
-        avg_dropped_frames = self.get_avg_dropped_frames()
-        avg_bitrate = self.get_avg_bitrate()
-        num_failed_sessions = self.get_num_failed_sessions()
-        #expected_next_session_duration = self.get_expected_next_session_duration()
-        #super_user = self.is_super_user()
-        self.summary = f'User {self.user_id} summary:\n ' \
-                        f'Number of sessions: {first_session_dt} \n' \
-                        f'Date of first session: {num_sessions} \n' \
-                        f'Date of most recent session: {latest_session_dt} \n' \
-                        f'Average time spent per session: {session_avg_duration} \n' \
-                        f'Most frequently used device: {favourite_device} \n' \
-                        f'Devices used: {devices_used} \n' \
-                        f'Average: \n' \
-                        f'\tRound trip time (RTT): {avg_round_trip_time} \n' \
-                        f'\tFrames per Second: {avg_frames_per_second} \n' \
-                        f'\tDropped Frames: {avg_dropped_frames} \n' \
-                        f'\tBitrate: {avg_bitrate} \n' \
-                        f'Total number of bad sessions (predicted using ML model): {num_failed_sessions} \n' \
-                        #f'Estimated next session time: {expected_next_session_duration} \n' \
-                        #f'Super user or Not (a user who has sessions time more than 60 min in a week): {super_user} \n'
-        return self.summary
-
-    
 
 
 if __name__ == '__main__':
     system = System(data_dir='./src/backend/data', csv_filename='db.csv') #todo argparse
+    # system = System(data_dir='./data', csv_filename='db.csv') #todo argparse
 
     while True:
         action = int(input(f'Choose one operation from below :\n' \
@@ -422,5 +428,3 @@ if __name__ == '__main__':
 
 
 
-
-#%%

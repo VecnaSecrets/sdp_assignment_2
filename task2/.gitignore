@@ -1,6 +1,11 @@
 src/*/*_backup*
 ./*backup*
 ./src/__pycache__
-./src/backend/summary/*
-./src/backend/data/*/*
+./src/backend/data/summary/*
 ./src/backend/data/*
+./data/
+./data/model_output/*
+./data/model_input/*
+./data/summary/*
+.vscode/
+./src/backend/data/*/*

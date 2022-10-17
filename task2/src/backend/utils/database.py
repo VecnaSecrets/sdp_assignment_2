@@ -27,23 +27,23 @@ class database:
             self._ref = super().__new__(self)
         return self._ref
 
-    def __init__(self, start=datetime(2022, 9, 1), save_path='./data/db.csv'):
+    def __init__(self, start=datetime(2022, 9, 3), ground_date=datetime(2022, 9, 1), save_path='./data/db.csv'):
 
         self.start_date = start
         #self.data = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
-        self.last_update = start
+        self.last_update = ground_date
         self.session_start = datetime.now()
         with open('./src/backend/utils/url_data.json', 'r') as f:
             self.data_urls = json.load(f)
         self.save_path = save_path
 
-        _ = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        _.to_csv(self.save_path, index=False)
-        self.get_data_for_period(datetime(2022, 9, 1), self.start_date)
+        #_ = pd.DataFrame(columns=["client_user_id", "session_id", 'dropped_frames', 'FPS',	'bitrate',	'RTT',	'timestamp',	'device'])
+        #os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        #_.to_csv(self.save_path, index=False)
+        #self.get_data_for_period(datetime(2022, 9, 1), self.start_date)
 
 
-    def get_data_for_period(self, start=None, end=None, save_to_file=True):
+    def get_data_for_period(self, start=None, end=None, save_to_file=False):
         print("Downloading data... ")
         if start is None:
             start = self.last_update
