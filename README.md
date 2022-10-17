@@ -1,1 +1,0 @@
-# sdp_assignment_2

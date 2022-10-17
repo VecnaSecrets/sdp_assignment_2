@@ -12,7 +12,10 @@ class Terminal:
         action = 0
         while action != 5:
             self.print_actions()
-            action = int(input('Choose an action:'))
+            try:
+                action = int(input('Choose an action:'))
+            except:
+                print('\033[91m' + 'Wrong input, enter number\n' + '\033[0m')
             self.do_action(action)
         for inst in self.EdInstitutions:
             print(inst)
@@ -28,14 +31,27 @@ class Terminal:
     @staticmethod
     def get_room_type():
         print('Enter room type:\n1. Classroom\n 2. Lecture auditorium')
-        return int(input()) == 1
+        try:
+            ind = int(input())
+            if ind != 1 and ind != 2:
+                print('\033[91m' + '\nWrong input, choose number from list(1 or 2)\n' + '\033[0m')
+            else:
+                return ind == 1
+        except:
+            print('\033[91m' + 'Wrong input, enter 1 or 2\n' + '\033[0m')
 
     @staticmethod
     def get_room_props(room_type):
         print('Enter room properties:\n')
-        capacity = int(input('Capacity: '))
-        number = int(input('Number: '))
-        conditioner = input('Has air conditioner?(yes or no) ')
+        try:
+            capacity = int(input('Capacity: '))
+            number = int(input('Number: '))
+            conditioner = input('Has air conditioner?(yes or no) ')
+            if conditioner != 'yes' and conditioner != 'no':
+                raise ValueError
+        except:
+            print('\033[91m' + '\nWrong input\n' + '\033[0m')
+            return
         if room_type:
             return Classroom(capacity, number, conditioner == 'yes')
         else:
@@ -49,22 +65,39 @@ class Terminal:
         print('Choose rome number from list below:\n')
         for ind, room in enumerate(rooms):
             print(f'{ind + 1}. {room.number}')
-        return int(input()) - 1
+        try:
+            ind = int(input()) - 1
+            if ind >= len(rooms) or ind < 0:
+                print('\033[91m' + '\nWrong input, choose number from list\n' + '\033[0m')
+            else:
+                return ind
+        except:
+            print('\033[91m' + '\nWrong input, enter number\n' + '\033[0m')
 
     def get_institution(self):
         print('Enter institution number from list below:\n')
         for ind, inst in enumerate(self.EdInstitutions):
             print(f'{ind + 1}. {inst.name}')
-        return int(input()) - 1
+        try:
+            ind = int(input()) - 1
+            if ind >= len(self.EdInstitutions) or ind < 0:
+                print('\033[91m' + '\nWrong input, choose number from list\n' + '\033[0m')
+            else:
+                return ind
+        except:
+            print('\033[91m' + '\nWrong input, enter number\n' + '\033[0m')
 
     @staticmethod
     def get_activity():
-        print('Enter activity name: ')
-        name = input()
-        print('Enter start time(format: HH:MM::SS):')
-        start = datetime.strptime(input(), '%H:%M:%S')
-        print('Enter end time(format: HH:MM::SS):')
-        end = datetime.strptime(input(), '%H:%M:%S')
+        try:
+            print('Enter activity name: ')
+            name = input()
+            print('Enter start time(format: HH:MM::SS):')
+            start = datetime.strptime(input(), '%H:%M:%S').time()
+            print('Enter end time(format: HH:MM::SS):')
+            end = datetime.strptime(input(), '%H:%M:%S').time()
+        except:
+            print('\033[91m' + '\nWrong input\n' + '\033[0m')
         return Activity(name, start, end)
 
     def add_institution(self, institution):
@@ -81,20 +114,44 @@ class Terminal:
             self.print_room_pipeline()
 
     def add_pipeline(self):
-        inst_ind = self.get_institution()
-        room_type = self.get_room_type()
-        room = self.get_room_props(room_type)
+        while 1:
+            inst_ind = self.get_institution()
+            if inst_ind is not None:
+                break
+        while 1:
+            room_type = self.get_room_type()
+            if room_type is not None:
+                break
+        while 1:
+            room = self.get_room_props(room_type)
+            if room is not None:
+                break
         self.EdInstitutions[inst_ind].add_room(room_type, room)
 
     def print_inst_pipeline(self):
-        inst_ind = self.get_institution()
+        while 1:
+            inst_ind = self.get_institution()
+            if inst_ind is not None:
+                break
         print(self.EdInstitutions[inst_ind])
 
     def activity_assigning_pipeline(self):
-        inst_ind = self.get_institution()
-        room_type = self.get_room_type()
-        room_ind = self.get_room_number(inst_ind, room_type)
-        activity = self.get_activity()
+        while 1:
+            inst_ind = self.get_institution()
+            if inst_ind is not None:
+                break
+        while 1:
+            room_type = self.get_room_type()
+            if room_type is not None:
+                break
+        while 1:
+            room_ind = self.get_room_number(inst_ind, room_type)
+            if room_ind is not None:
+                break
+        while 1:
+            activity = self.get_activity()
+            if activity is not None:
+                break
 
         if room_type:
             self.EdInstitutions[inst_ind].classrooms[room_ind].add_activity(activity)
