@@ -49,9 +49,9 @@ class EdInstitution:
         return f'{self.name}\n' \
                f'Classroom(s):{len(self.classrooms)}\n' \
                f'Auditorium(s){len(self.LectureAuditoriums)}\n' \
-               f'(Current time:{datetime.utcnow().time().strftime("%H:%M:%S")})\n' \
                f'Available:\tClassrooms:{free_classrooms}\n' \
-               f'\t\t\tLecture auditoriums:{free_auditoriums}\n'
+               f'\t\t\tLecture auditoriums:{free_auditoriums}\n'\
+               f'(Current time:{datetime.now().time().strftime("%H:%M:%S")})\n'
 
     def restoreFromFile(self, filename):
         f = open(filename)

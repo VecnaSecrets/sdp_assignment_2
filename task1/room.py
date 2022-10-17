@@ -9,7 +9,7 @@ class Room:
         """
         Utility function checking if time is in interval (begin_time, end_time)
         """
-        check_time = check_time or datetime.utcnow().time()
+        check_time = check_time or datetime.now().time()
         if begin_time < end_time:
             return begin_time <= check_time <= end_time
         else:
