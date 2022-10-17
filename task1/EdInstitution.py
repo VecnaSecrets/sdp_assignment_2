@@ -44,10 +44,14 @@ class EdInstitution:
         return self.LectureAuditoriums
 
     def __str__(self):
+        free_classrooms = self.find_free_rooms(self.classrooms)
+        free_auditoriums = self.find_free_rooms(self.LectureAuditoriums)
         return f'{self.name}\n' \
                f'Classroom(s):{len(self.classrooms)}\n' \
                f'Auditorium(s){len(self.LectureAuditoriums)}\n' \
-               f'Available:...\n'
+               f'(Current time:{datetime.utcnow().time().strftime("%H:%M:%S")})\n' \
+               f'Available:\tClassrooms:{free_classrooms}\n' \
+               f'\t\t\tLecture auditoriums:{free_auditoriums}\n'
 
     def restoreFromFile(self, filename):
         f = open(filename)
@@ -79,7 +83,7 @@ class EdInstitution:
 
     def find_room(self, number):
         for room in self.classrooms + self.LectureAuditoriums:
-            if room['number'] == number:
+            if room.number == number:
                 return room
 
     def add_room(self, is_classroom, room):
@@ -88,9 +92,11 @@ class EdInstitution:
         else:
             self.LectureAuditoriums(room)
 
-    def remove_room(self, number):
-        room = self.find_room(number)
-        del room
+    def remove_room(self, is_classroom, number):
+        if is_classroom:
+            self.classrooms = list(filter(lambda x: x.number != number, self.classrooms))
+        else:
+            self.LectureAuditoriums = list(filter(lambda x: x.number != number, self.LectureAuditoriums))
 
     def print_classrooms(self):
         for classroom in self.classrooms:
@@ -103,3 +109,7 @@ class EdInstitution:
     def print_all_rooms(self):
         self.print_classrooms()
         self.print_auditoriums()
+
+    @staticmethod
+    def find_free_rooms(rooms):
+        return list(filter(lambda x: x.is_free(), rooms))

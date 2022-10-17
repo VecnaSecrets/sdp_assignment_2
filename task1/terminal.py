@@ -12,19 +12,17 @@ class Terminal:
         action = 0
         while action != 5:
             self.print_actions()
-            action = int(input())
+            action = int(input('Choose an action:'))
             self.do_action(action)
         for inst in self.EdInstitutions:
             print(inst)
-
-
 
     @staticmethod
     def print_actions():
         print("\t1 : Add classroom or Auditorium to institution\n"
               "\t2 : Print institution summary\n"
               "\t3 : Assign activity\n"
-              "\t4 : ......\n"
+              "\t4 : Print room summary\n"
               "\t5 : Exit program\n")
 
     @staticmethod
@@ -76,9 +74,11 @@ class Terminal:
         if action == 1:
             self.add_pipeline()
         elif action == 2:
-            self.print_pipeline()
+            self.print_inst_pipeline()
         elif action == 3:
             self.activity_assigning_pipeline()
+        elif action == 4:
+            self.print_room_pipeline()
 
     def add_pipeline(self):
         inst_ind = self.get_institution()
@@ -86,7 +86,7 @@ class Terminal:
         room = self.get_room_props(room_type)
         self.EdInstitutions[inst_ind].add_room(room_type, room)
 
-    def print_pipeline(self):
+    def print_inst_pipeline(self):
         inst_ind = self.get_institution()
         print(self.EdInstitutions[inst_ind])
 
@@ -100,3 +100,12 @@ class Terminal:
             self.EdInstitutions[inst_ind].classrooms[room_ind].add_activity(activity)
         else:
             self.EdInstitutions[inst_ind].LectureAuditoriums[room_ind].add_activity(activity)
+
+    def print_room_pipeline(self):
+        inst_ind = self.get_institution()
+        room_type = self.get_room_type()
+        room_ind = self.get_room_number(inst_ind, room_type)
+        if room_type:
+            print(self.EdInstitutions[inst_ind].classrooms[room_ind])
+        else:
+            print(self.EdInstitutions[inst_ind].LectureAuditoriums[room_ind])
