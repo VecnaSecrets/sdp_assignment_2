@@ -90,7 +90,7 @@ class EdInstitution:
         if is_classroom:
             self.classrooms.append(room)
         else:
-            self.LectureAuditoriums(room)
+            self.LectureAuditoriums.append(room)
 
     def remove_room(self, is_classroom, number):
         if is_classroom:

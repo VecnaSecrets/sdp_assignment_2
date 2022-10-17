@@ -72,6 +72,7 @@ class Room:
             return False
         for act in self.activities:
             if start < act.end and act.start < end:
+                print("Im here")
                 return False
         return True
 
