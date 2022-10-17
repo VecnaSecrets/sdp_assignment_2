@@ -5,6 +5,5 @@ RUN pip install -U pip
 RUN pip install --upgrade setuptools
 RUN pip3 install catboost
 RUN python3 -m pip install --upgrade pip && pip install -r model_requirements.txt
-RUN pip list
 
 ENTRYPOINT ["python", "./src/model/model.py"]
