@@ -1,21 +1,25 @@
-from glob import glob
-from os import path
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
-from catboost import CatBoostRegressor
 from category_encoders import OneHotEncoder
-from joblib import dump, load
-from sklearn.model_selection import train_test_split
-from xgboost import XGBRegressor
 
-if __name__ == "__main__":
+
+def pipeline(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
+    """Applies custom pipeline to the passed dataframe.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        dataframe to transform
+
+    Returns
+    -------
+    Tuple[pd.DataFrame, pd.Series]
+        X and y
+    """
+
     # Dataset
-
-    DATASET_PATH = "SSD2022AS2"
-
-    # TODO: Add path to the .csv file here
-    df = pd.read_csv(filepath_or_buffer=path.join(DATASET_PATH, ...))
 
     df.timestamp = pd.to_datetime(df.timestamp)
 
@@ -51,23 +55,4 @@ if __name__ == "__main__":
 
     df = OneHotEncoder(cols=["device_unique"], use_cat_names=True).fit_transform(X=df)
 
-    # Split
-
-    X = df.drop(labels=["timestamp_ptp"], axis=1)
-    y = df.timestamp_ptp
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1)
-
-    # Session Time
-    # Model
-
-    # cat_boost_regressor = CatBoostRegressor()
-    cat_boost_regressor = load("CatBoostRegressor.joblib")
-    cat_boost_regressor.fit(X=X_train, y=y_train)
-
-    y_pred = cat_boost_regressor.predict(data=X_test)
-
-    # xgb_regressor = XGBRegressor()
-    # xgb_regressor.fit(X=X_train, y=y_train)
-
-    # y_pred = xgb_regressor.predict(X=X_test)
+    return (df.drop(labels=["timestamp_ptp"]), df.timestamp_ptp)
