@@ -19,7 +19,9 @@ warnings.filterwarnings("ignore")
 
 START_DATE = datetime(2022, 9, 2)
 GROUND_DATE = datetime(2022, 9, 1)
-class System:    
+class System:
+    data_input_path = './src/model/model_input/'
+    data_output_path = Path('./src/model/model_output/')
     def __init__(self, data_dir, csv_filename, model=None) -> None:
         self.data_dir = Path(data_dir)
 
@@ -27,16 +29,20 @@ class System:
         os.makedirs(os.path.dirname(self.data_dir / 'model_input' ), exist_ok=True)
         os.makedirs(os.path.dirname(self.data_dir / 'model_output' ), exist_ok=True)
         
-
-        self.db = database(start=START_DATE, save_path= self.data_dir / csv_filename)
+        self.db = database(start=START_DATE, ground_date=GROUND_DATE, save_path= self.data_dir / csv_filename)
         self.connect_db()
-        self.update_user_data(csv_filename)
-        self.model = model
+        database_path = self.fetch_data()
+        self.update_user_data(database_path)
+
         self.sql_mask = "YYYY-MM-DD HH24:MI:SS"
+
+        pd.read_sql("SELECT * FROM users_sum", self.conn).to_csv("./users_exm.csv")
+        pd.read_sql("SELECT * FROM sessions_sum", self.conn).to_csv("./sessions_exm.csv")
 
     def connect_db(self):
         conn_string = "host='db' dbname='postgres_db' user='user' password='password'" 
         self.conn = psycopg2.connect(conn_string)
+        sleep(2)
         self.conn.autocommit = True
         self.cursor = self.conn.cursor()
 
@@ -55,23 +61,30 @@ class System:
                                         bitrate REAL,
                                         RTT REAL,
                                         timestamp timestamp WITHOUT TIME ZONE,
-                                        device TEXT
-                                        --, stream_quality REAL,
-                                        --next_session REAL
+                                        device TEXT,
+                                        stream_quality REAL,
+                                        next_session REAL
                                     )"""
         self.cursor.execute(sql)
         sql = """
                 CREATE OR REPLACE VIEW sessions_sum AS
                 SELECT client_user_id, 
                         session_id,
-                        AVG(dropped_frames) as avg_dropped_frames,
                         AVG(FPS) as avg_fps,
+                        STDDEV(FPS) as std_fps,
                         AVG(bitrate) as avg_bitrate,
+                        STDDEV(bitrate) as std_bitrate,
+                        AVG(dropped_frames) as avg_dropped_frames,
+                        STDDEV(dropped_frames) as std_dropped_frames,
+                        MAX(dropped_frames) as max_dropped_frames,
+                        STDDEV(RTT) as std_rtt,
                         AVG(RTT) as avg_rtt,
                         STRING_AGG(DISTINCT device, ',') as device,
                         EXTRACT(EPOCH FROM MAX(timestamp::timestamp)-MIN(timestamp::timestamp))/3600 as total_hours,
                         MAX(timestamp::timestamp) as session_end,
-                        MIN(timestamp::timestamp) as session_start
+                        MIN(timestamp::timestamp) as session_start,
+                        AVG(stream_quality) as stream_quality,
+                        AVG(next_session) as next_session
                 from users
                 GROUP BY client_user_id, session_id
         """
@@ -83,27 +96,33 @@ class System:
                         COUNT(DISTINCT session_id) as num_sessions,
                         AVG(avg_dropped_frames) as avg_dropped_frames,
                         AVG(avg_fps) as avg_fps,
+                        AVG(std_fps) as std_fps,
                         AVG(avg_bitrate) as avg_bitrate,
+                        AVG(std_bitrate) as std_bitrate,
                         AVG(avg_rtt) as avg_rtt,
+                        AVG(std_rtt) as std_rtt,
                         STRING_AGG(DISTINCT device, ',') as devices,
                         COUNT(*) FILTER (WHERE device='Windows') AS Windows_entry,
                         COUNT(*) FILTER (WHERE device='Mac') AS Mac_entry,
                         COUNT(*) FILTER (WHERE device='Android') AS Android_entry,
                         SUM(total_hours) as total_hours,
                         MAX(session_start)::date as last_session,
-                        MIN(session_start)::date as first_session
+                        MIN(session_start)::date as first_session,
+                        AVG(stream_quality) as stream_quality,
+                        AVG(next_session) as next_session
                 from sessions_sum
                 GROUP BY client_user_id
         """
         self.cursor.execute(sql)
 
-
     def fetch_data(self):
-        data = self.db.update_database(save=True)
+        data = self.db.update_database(save=False)
+        data["stream_quality"] = 0
+        data["next_session"] = 0
         timestamp = self.db.last_update.strftime("%B %d, %Y")
         csv_filename = f'db_update_{timestamp}.csv'
-        data.to_csv(self.data_dir / csv_filename, index=False)
 
+        data.to_csv(self.data_dir / csv_filename, index=False)
         return csv_filename
 
     def update_user_data(self, csv_filename):
@@ -112,9 +131,57 @@ class System:
 
         sql = """COPY users FROM STDIN DELIMITER ',' CSV HEADER"""
         self.cursor.copy_expert(sql, open(csv_path, "r"))
+        self.update_model_results()
 
-    def update_model(self):
-        pass
+    def update_model_results(self):
+        timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+
+        sessions_path = self.data_input_path + f"sessions_{timestamp}_data.csv"
+        users_path = self.data_input_path + f"users_{timestamp}_data.csv"
+        pd.read_sql("SELECT * FROM sessions_sum", self.conn).to_csv(sessions_path, index=False)
+        pd.read_sql("SELECT * FROM users_sum", self.conn).to_csv(users_path, index=False)
+
+        sessions_path = self.data_output_path / f"sessions_{timestamp}_data.csv"
+        users_path = self.data_output_path / f"users_{timestamp}_data.csv"
+
+        while not os.path.isfile(sessions_path):
+            sleep(1)
+
+        self.cursor.execute("""DROP TABLE IF EXISTS temp;""")
+        sql = """CREATE TABLE temp(
+            client_user_id varchar(50),
+            stream_quality REAL
+        )"""
+        self.cursor.execute(sql)
+        sql = """COPY temp FROM STDIN DELIMITER ',' CSV HEADER"""
+        self.cursor.copy_expert(sql, open(sessions_path, "r"))
+
+        sql = """UPDATE users 
+                SET users.stream_quality = temp.stream_quality
+                WHERE users.client_user_id = temp.client_user_id
+                STDIN DELIMITER ',' CSV HEADER"""
+
+
+        while not os.path.isfile(users_path):
+            sleep(1)
+
+        self.cursor.execute("""DROP TABLE IF EXISTS temp;""")
+        sql = """CREATE TABLE temp(
+            session_id varchar(50),
+            next_session REAL
+        )"""
+        self.cursor.execute(sql)
+        sql = """COPY temp FROM STDIN DELIMITER ',' CSV HEADER"""
+        self.cursor.copy_expert(sql, open(users_path, "r"))
+
+        sql = """UPDATE users 
+                SET users.next_session = temp.next_session
+                WHERE users.session_id = temp.session_id
+                STDIN DELIMITER ',' CSV HEADER"""
+
+
+
+
 
     def get_all_users(self):
         query = '''select distinct(user_id) from users;'''
@@ -168,6 +235,7 @@ class System:
         if save_to_file == 'yes' or save_to_file == 'y':
             timestamp = strftime("%Y-%m-%d %H:%M:%S", gmtime())
             output_filename = self.data_dir / 'summaries' / f'system_summary_{timestamp}.txt'
+            os.makedirs(os.path.dirname(output_filename), exist_ok=True)
             self.save_to_file(summary, output_filename)
 
     def get_status_past_week(self):
@@ -246,8 +314,6 @@ class System:
         frequent_dev = i[index[0]]
         row = data.iloc[0]
 
-        # todo: add prediction from the model for estimated time 
-        # todo: total number of bad session is current + predicted (?)
         user_summary = f"""
         User with id : {user_id}
             Number of sessions : {row["num_sessions"]}
@@ -310,7 +376,6 @@ class System:
         '''4 : Fetch new data and update users data and ML model'''
         csv_filename = self.fetch_data()
         self.update_user_data(csv_filename=csv_filename)
-        self.update_model()
 
     def get_top_users(self):
         '''5 : Get top 5 users based on time spent gaming'''
