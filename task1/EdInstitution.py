@@ -2,7 +2,7 @@ import json
 from Classroom import Classroom
 from LectureAuditorium import LectureAuditorium
 from activity import Activity
-from datetime import datetime, date
+from datetime import datetime, time
 
 
 class EdInstitution:
@@ -13,8 +13,8 @@ class EdInstitution:
 
         :param value: attribute of class to be encoded
         """
-        if isinstance(value, date):
-            return value.strftime('%d-%m-%Y, %H:%M:%S')
+        if isinstance(value, time):
+            return value.strftime('%H:%M:%S')
         else:
             return value.__dict__
 
@@ -63,16 +63,16 @@ class EdInstitution:
         for classroom in data['classrooms']:
             new_classroom = Classroom(classroom['capacity'], classroom['number'], classroom['has_conditioner'])
             for activity in classroom['activities']:
-                start = datetime.strptime(activity['start'], '%d-%m-%Y, %H:%M:%S')
-                end = datetime.strptime(activity['end'], '%d-%m-%Y, %H:%M:%S')
+                start = datetime.strptime(activity['start'], '%H:%M:%S').time()
+                end = datetime.strptime(activity['end'], '%H:%M:%S').time()
                 new_classroom.add_activity(Activity(activity['name'], start, end))
             self.classrooms.append(new_classroom)
 
         for auditorium in data['LectureAuditoriums']:
             new_auditorium = LectureAuditorium(auditorium['capacity'], auditorium['number'], auditorium['has_conditioner'])
             for activity in auditorium['activities']:
-                start = datetime.strptime(activity['start'], '%d-%m-%Y, %H:%M:%S')
-                end = datetime.strptime(activity['end'], '%d-%m-%Y, %H:%M:%S')
+                start = datetime.strptime(activity['start'], '%H:%M:%S').time()
+                end = datetime.strptime(activity['end'], '%H:%M:%S').time()
                 new_auditorium.add_activity(Activity(activity['name'], start, end))
             self.LectureAuditoriums.append(new_auditorium)
 
