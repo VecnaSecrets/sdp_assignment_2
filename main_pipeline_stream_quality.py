@@ -1,11 +1,8 @@
-from typing import Tuple
-
 import numpy as np
 import pandas as pd
-from category_encoders import OneHotEncoder
 
 
-def pipeline(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
+def pipeline(df: pd.DataFrame) -> pd.DataFrame:
     """Applies a custom pipeline to the passed dataset.
 
     Parameters
@@ -15,8 +12,8 @@ def pipeline(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
 
     Returns
     -------
-    Tuple[pd.DataFrame, pd.Series]
-        X and y
+    pd.DataFrame
+        X
     """
     # df = df.groupby(by=["client_user_id", "session_id"]).aggregate(
     #     avg_fps=pd.NamedAgg(column="FPS", aggfunc=np.mean),
@@ -39,7 +36,7 @@ def pipeline(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     # df["stream_quality"] = 0.0
     # df["next_session"] = 0.0
 
-    df = df.reset_index()
+    df = df.reset_index(drop=True)
 
     df = df.replace(to_replace=np.nan, value=0)
 
@@ -51,15 +48,41 @@ def pipeline(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
             "session_id",
             "session_end",
             "session_start",
+            "stream_quality",
+            "next_session",
+            "device",
+            "avg_bitrate",
+            "std_bitrate",
         ],
         axis=1,
     )
 
-    df = OneHotEncoder(cols=["device"], use_cat_names=True).fit_transform(X=df)
+    df.rename(
+        columns={
+            "avg_fps": "fps_mean",
+            "std_fps": "fps_std",
+            "avg_dropped_frames": "dropped_frames_mean",
+            "std_dropped_frames": "dropped_frames_std",
+            "max_dropped_frames": "dropped_frames_max",
+            "avg_rtt": "rtt_mean",
+            "std_rtt": "rtt_std",
+        }
+    )
+
+    df = df[
+        [
+            "fps_mean",
+            "fps_std",
+            "rtt_mean",
+            "rtt_std",
+            "dropped_frames_mean",
+            "dropped_frames_std",
+            "dropped_frames_max",
+        ]
+    ]
 
     # Split
 
-    X = df.drop(labels=["stream_quality", "next_session"], axis=1)
-    y = df.stream_quality
+    X = df
 
-    return X, y
+    return X

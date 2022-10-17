@@ -44,7 +44,7 @@ def pipeline(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     # df["stream_quality"] = 0.0
     # df["next_session"] = 0.0
 
-    df = df.reset_index()
+    df = df.reset_index(drop=True)
 
     df = df.replace(to_replace=np.nan, value=0)
 
