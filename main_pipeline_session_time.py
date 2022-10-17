@@ -64,6 +64,6 @@ def pipeline(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     # Split
 
     X = df.drop(labels=["stream_quality", "next_session"], axis=1)
-    y = df.next_session
+    y = df.total_hours
 
     return X, y
