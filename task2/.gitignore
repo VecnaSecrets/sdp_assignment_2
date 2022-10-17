@@ -8,3 +8,4 @@ src/*/*_backup*
 ./data/model_input/*
 ./data/summary/*
 .vscode/
+./src/backend/data/*/*

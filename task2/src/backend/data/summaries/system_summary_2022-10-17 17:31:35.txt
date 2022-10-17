@@ -1,0 +1,4 @@
+Statistics for the past 7 days: 
+Total sessions : 194 
+Average time spent per session : 60.0 mins 
+Sum of hours spent by all users : 195.48 hours
