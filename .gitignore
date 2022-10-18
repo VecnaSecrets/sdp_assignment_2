@@ -130,3 +130,9 @@ dmypy.json
 
 # macOS
 .DS_Store
+
+# Visual Studio Code
+.vscode/
+
+# Jupyter Notebook
+catboost_info/
